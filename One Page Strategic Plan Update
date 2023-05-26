@@ -1,0 +1,571 @@
+--This file runs an update pulling in all manually inpout entries into a filtering table
+--I kept all the code to create tables and drop tables from their creation as notes if something werre 
+
+--OPSP_Man_Filter
+
+
+----You need to run this if you import the Goals for opsp
+
+--varchar is fiscal Qtr and Year
+
+--Update
+--OPSP_Goals
+--set
+--FiscalQtr = 'Q' + FiscalQtr
+--Where --used to do on specific rowss
+
+
+
+---OPSP Actual Table construction here
+--combine all tables here to populate OPSP
+--Brings original data from staging table in and structures it for analysis
+
+
+
+--Create Table
+--OPSP_Manual_Entries2
+--	([EntryID] int,
+--	[StartTime] datetime,
+--	[EndTime] datetime,
+--	[FiscalYear] varchar (4),
+--	[FiscalQtr] varchar (2),
+--	[QtrEndDate] varchar(50),
+--	[Source] nvarchar (255),
+--	[Metric] nvarchar (255),
+--	[Value] numeric(20, 2),
+--	[Text] varchar (50),
+--	[ReportDate] date)
+
+truncate table 
+	OPSP_Manual_Entries2
+
+Insert into	
+	OPSP_Manual_Entries2
+Select
+	EntryID,
+	[StartTime],
+	[EndTime],
+	Cast(FiscalYear as varchar(4)) as FiscalYear,
+	Cast(FiscalQtr as varchar(2)) as FiscalQtr,
+	--this variable is varchar
+	Cast(Concat(FiscalYear,'-',QtrEndDate) as varchar (50)) as QtrEndDate,
+	Source,
+	Metric,
+	Value,
+	Text
+	,ReportDate
+From
+(select cast(s.ID as int) as [EntryID]
+	  ,cast(s.[Start time] as datetime) as [StartTime]
+	  ,cast(s.[Completion time] as datetime) as [EndTime]
+	  ,Case when ReportDate >='2022/10/01' and  ReportDate <= ' 2023/09/30' then '2023'
+	  when ReportDate >='2021/10/01' and  ReportDate <= ' 2022/09/30' then '2022'
+	  when ReportDate >='2020/10/01' and  ReportDate <= ' 2021/09/30' then '2021'
+	  when ReportDate >='2019/10/01' and  ReportDate <= ' 2020/09/30' then '2020'else 0 end as FiscalYear 
+	  ,Case when s.FiscalQtr is null then 'NA' else s.FiscalQtr end as FiscalQtr
+	  --this needs to be fixed to be a date. Concat and still having a case when statement
+	  ,case when FiscalQtr = 'Q1' then '12-31' 
+	  when FiscalQtr = 'Q2' then '03-31'
+	  when FiscalQtr = 'Q3' then '06-30'
+	  when FiscalQtr = 'Q4' then '09-30'
+	  when FiscalQtr ='Q0' then '09-30' else '00-00' end as QtrEndDate
+	  ,coalesce(s.Metric,s.[MTN Metric],s.[EH Metric],s.[ETC Metric],s.[FMDT Metric]) as 'Source'
+	  ,coalesce(s.[MTN Metric],s.[EH Metric],s.[ETC Metric],s.[FMDT Metric],s.[SR Metric]) as 'Metric'
+      ,cast(s.Response_Num as float) as [Value]
+      ,cast(s.Response_Text as varchar(50)) as [Text]
+      ,cast(s.[ReportDate] as date) as ReportDate
+from OPSP_Manual_Entries_Stg s) as opsp
+
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+--OPSP Filter Table
+
+--Create Table
+--	OPSP_Filter
+--	([FiscalYear] varchar (100),
+--	[FiscalQtr] varchar (100),
+--	--[QtrEndDate] varchar(100),
+--	--[Source] nvarchar (255),
+--	[Metric] nvarchar (255),  
+--	[EndTime] datetime)
+
+Truncate Table
+	OPSP_Filter
+Insert into
+	OPSP_Filter
+Select
+	FiscalYear,
+	case when fiscalQtr ='FY' then 'Q0' else FiscalQtr end AS FiscalQtr,
+	--QtrEndDate,
+	Metric,
+	Max(EndTime) as EndTime
+From
+	OPSP_Manual_Entries2
+group by Metric, FiscalQtr, FiscalYear
+
+
+
+--Join Filter and manual
+--create table for the manual entries so we pull only the most recent data into the final table
+
+
+--Create table
+--	OPSP_Filtered_Manual
+--	([FiscalYear] varchar (100),
+--	[FiscalQtr] varchar (100),
+--	--[QtrEndDate] varchar(50),
+--	[Source] nvarchar (255),
+--	[Metric] nvarchar (255),
+--	[Value] numeric(20,2),
+--	[Text] varchar (50),
+--	[EndTime] datetime)
+Truncate Table
+	OPSP_Filtered_Manual
+INsert into	
+	OPSP_Filtered_Manual
+Select
+	f.[FiscalYear],
+	f.FiscalQtr,
+	--m.QtrEndDate,
+	[Source],
+	f.Metric,
+	[Value],
+	[Text],
+	f.EndTime
+From
+	OPSP_Filter f
+ left join
+	OPSP_Manual_Entries2 m
+	on 
+	--m.FiscalQtr = f.FiscalQtr and
+	--m.Metric = f.Metric and
+	m.[EndTime] = f.EndTime
+order by
+	fiscalyear desc
+
+truncate Table
+OPSP_Manual_Entries_Stg --table comes from a dtsx package
+
+
+
+
+
+------------------------------------------------------------------------------------------------------------------------------------------
+------------------------------------------------------------------------------------------------------------------------------------------
+------------------------------------------------------------------------------------------------------------------------------------------
+
+--This pulls in information from the ERP system to fulfill specific metrics
+
+truncate table
+  Qtr_Volunteer_Hours
+
+insert into
+	Qtr_Volunteer_Hours
+Select
+hours.FiscalYear,
+hours.FiscalQtr,
+Metric,
+Sum(Hours) as 'Value'
+From
+(select
+*,
+case when DateVolunteered >='2022/10/01' and DateVolunteered<= '2023/09/30' then '2023' end as 'FiscalYear',
+case when DateVolunteered >='2022/10/01' and DateVolunteered<= '2022/12/31' then 'Q1' 
+when DateVolunteered >='2023/01/01' and DateVolunteered<= '2023/03/31' then 'Q2'
+when DateVolunteered >='2023/04/01' and DateVolunteered<= '2023/06/30' then 'Q3'
+when DateVolunteered >='2023/07/01' and DateVolunteered<= '2023/09/30' then 'Q4' end as 'FiscalQtr'
+from
+Galaxy_Hours) as hours
+left join
+	OPSP_Goals g
+	on
+	g.FiscalYear = hours.FiscalYear
+	and g.FiscalQtr = hours.FiscalQtr
+Where
+	[Status] = 'approved'
+	and Metric = 'Volunteer Hours'
+group by 
+	hours.FiscalYear, hours.FiscalQtr, g.Metric
+	
+--add metric to the table
+
+--this is how you add that to the table
+
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+--Fiscal Year Hours
+
+--Drop Table
+--	FiscalYear_Volunteer_Hours
+
+--Create Table
+--	FiscalYear_Volunteer_Hours
+--	(FiscalYear varchar (4),
+--	FiscalQtr varchar (2),
+--	[Hours] decimal)
+
+
+Truncate Table
+	FiscalYear_Volunteer_Hours
+  
+insert into
+	FiscalYear_Volunteer_Hours
+Select
+hours2.FiscalYear,
+hours2.FiscalQtr,
+Metric,
+Sum(Hours) as 'Hours'
+From
+(select
+*,
+case when DateVolunteered >='2022/10/01' and DateVolunteered<= '2023/09/30' then '2023' 
+when DateVolunteered >='2021/10/01' and DateVolunteered<= '2022/09/30' then '2022'end as 'FiscalYear',
+case when DateVolunteered >'2019/01/01' then 'Q0' end as 'FiscalQtr'
+from
+Galaxy_HOurs) as hours2
+left join
+	OPSP_Goals g
+	on
+	g.FiscalYear = hours2.FiscalYear
+	and g.FiscalQtr = hours2.FiscalQtr
+Where
+	Status = 'approved' and 
+	Metric = 'Volunteer Hours'
+group by 
+	hours2.FiscalYear, hours2.FiscalQtr, Metric
+
+
+---------------------------------------------------------------------------------------------------------------------------
+--Set up Pounds Distributed for OPSP
+
+--Quarterly Pounds Distributed
+
+--Drop Table
+--	Pounds_Distributed_Qtr
+
+--Create Table
+--	Pounds_Distributed_Qtr
+--	([FiscalYear] varchar (100),
+--	[FiscalQtr] varchar (100),
+--	[Pounds] varchar (100))
+--Truncate Table
+	--Pounds_Distributed_Qtr
+  
+Truncate Table  
+  Pounds_Distributed_Qtr
+  
+Insert into
+	Pounds_Distributed_Qtr
+Select 
+cast(y.FiscalYear as varchar (4)) as FiscalYear,
+cast(y.FiscalQtr as varchar(2)) as FiscalQtr,
+Metric,
+Sum(Pounds)*-1 as Pounds
+From
+(Select
+*
+from
+(Select
+*,
+case when RefDate like '%-10-%' or RefDate like '%-11-%' or RefDate like '%-12-%' then 'Q1' 
+when RefDate like'%-01-%' or RefDate like '%-02-%' or RefDate like '%-03-%' then 'Q2'
+when RefDate like '%-04-%' or RefDate like '%-05-%' or RefDate like '%-06-%' then 'Q3'
+when RefDate like'%-07-%' or RefDate like '%-08-%' or RefDate like '%-09-%' then 'Q4' end as 'FiscalQtr',
+Year(RefDate) as Year,
+Case when RefDate like '%-10-%' or RefDate like '%-11-%' or RefDate like '%-12-%' then Year(RefDate)+1 
+when RefDate like'%-01-%' or RefDate like '%-02-%' or RefDate like '%-03-%' or RefDate like '%-04-%' or RefDate like '%-05-%' or RefDate like '%-06-%' or RefDate like'%-07-%' or RefDate like '%-08-%' or RefDate like '%-09-%' then Year(RefDate)
+end as FiscalYear
+from
+view_ItemTransactionHistory) p
+Where
+RefType = 'Agency' or RefType = 'Agency - SPU' or RefType = 'Mobile'
+) y
+Left join
+OPSP_Goals g
+on g.FiscalYear = y.FiscalYear
+and g.FiscalQtr = y.FiscalQtr
+Where
+	Metric = 'Pounds Distributed in Network' and 
+	y.FiscalYear >=2023      --2023 was the first year we titled this metric as Pounds Distributed in Network. Can get previous years though by editting this a little.
+group by y.FiscalYear
+, y.FiscalQTr, Metric
+
+
+--FIscal Year Table
+
+--Drop Table
+--	Pounds_Distributed_Yearly
+
+--Create Table
+--	Pounds_Distributed_Yearly
+--	([FiscalYear] varchar (100),
+--	[FiscalQtr] varchar (100),
+--	[Pounds] varchar (100))
+
+truncate Table
+	Pounds_Distributed_Yearly
+  
+Insert into
+	Pounds_Distributed_Yearly
+Select 
+cast(y.FiscalYear as varchar (4)) as FiscalYear,
+cast(y.FiscalQtr as varchar(2)) as FiscalQtr,
+Metric,
+Sum(Pounds)*-1 as Pounds
+From
+(Select
+*
+from
+(Select
+*,
+case when RefDate like '%-10-%' or RefDate like '%-11-%' or RefDate like '%-12-%' or
+RefDate like'%-01-%' or RefDate like '%-02-%' or RefDate like '%-03-%' or
+RefDate like '%-04-%' or RefDate like '%-05-%' or RefDate like '%-06-%' or
+ RefDate like'%-07-%' or RefDate like '%-08-%' or RefDate like '%-09-%' then 'Q0' end as 'FiscalQtr',
+Year(RefDate) as Year,
+Case when RefDate like '%-10-%' or RefDate like '%-11-%' or RefDate like '%-12-%' then Year(RefDate)+1 
+when RefDate like'%-01-%' or RefDate like '%-02-%' or RefDate like '%-03-%' or RefDate like '%-04-%' or RefDate like '%-05-%' or RefDate like '%-06-%' or RefDate like'%-07-%' or RefDate like '%-08-%' or RefDate like '%-09-%' then Year(RefDate)
+end as FiscalYear
+from
+view_ItemTransactionHistory) p
+Where
+RefType = 'Agency' or RefType = 'Agency - SPU' or RefType = 'Mobile'
+) y
+Left join
+OPSP_Goals g
+on g.FiscalYear = y.FiscalYear
+and g.FiscalQtr = y.FiscalQtr
+Where
+	Metric = 'Pounds Distributed in Network' and 
+	y.FiscalYear >=2023      --2023 was the first year we titled this metric as Pounds Distributed in Network. Can get previous years though by editting this a little.
+group by y.FiscalYear,y.FiscalQtr
+, Metric
+
+
+--------------------------------------------------------------------------------------------------------------------------------------------
+--------------------------------------------------------------------------------------------------------------------------------------------
+--------------------------------------------------------------------------------------------------------------------------------------------
+
+--This is where the tables are combined to make the final table used tio visualize the different KPI for the organization
+
+
+
+
+--OPSP_Final
+
+
+
+	--Create Table that inserts most recent entries into the specific goals to give us the most updated info while keeping records not filled by the manual entry
+Truncate Table
+	OPSP_Actual2
+Insert into	
+	OPSP_Actual2
+Select
+	g.[FiscalYear],
+	g.FiscalQtr,
+	g.SourceSort,
+	g.[Source],
+	Sort,
+	MetricSort,
+	g.Metric,
+	m.[Value],
+	m.[Text],
+	g.Format
+From
+	OPSP_Goals g
+Left Join
+	OPSP_Filtered_Manual m
+	on
+	m.FiscalYear = g.FiscalYear and
+	m.FiscalQtr = g.FiscalQtr and
+	m.Metric = g.Metric
+
+--will need to add Q3 and Q4
+
+
+Update
+	OPSP_Actual2
+set Value = (Select
+	Hours
+	from
+	Qtr_Volunteer_Hours
+	Where FiscalYear = '2023' and FiscalQtr = 'Q2' and Metric ='Volunteer Hours') 
+Where 
+	FiscalYear = '2023' and FiscalQtr = 'Q2' and Metric = 'Volunteer Hours'
+
+Update
+	OPSP_Actual2
+set Value = (Select
+	HOurs
+	from
+	Qtr_Volunteer_Hours
+	Where FiscalYear = '2023' and FiscalQtr = 'Q1' and Metric ='Volunteer Hours') 
+Where 
+	FiscalYear = '2023' and FiscalQtr = 'Q1' and Metric = 'Volunteer Hours'
+
+	Update
+	OPSP_Actual2
+set Value = (Select
+	HOurs
+	from
+	Qtr_Volunteer_Hours
+	Where FiscalYear = '2023' and FiscalQtr = 'Q3' and Metric ='Volunteer Hours') 
+Where 
+	FiscalYear = '2023' and FiscalQtr = 'Q3' and Metric = 'Volunteer Hours'
+
+Update
+	OPSP_Actual2
+set Value = (Select
+	HOurs
+	from
+	Qtr_Volunteer_Hours
+	Where FiscalYear = '2023' and FiscalQtr = 'Q4' and Metric ='Volunteer Hours') 
+Where 
+	FiscalYear = '2023' and FiscalQtr = 'Q4' and Metric = 'Volunteer Hours'
+
+Update
+	OPSP_Actual2
+set Value = (Select
+	Hours
+	from
+	FiscalYear_Volunteer_Hours
+	Where FiscalYear = '2023' and FiscalQtr = 'Q0' and Metric ='Volunteer Hours') 
+Where 
+	FiscalYear = '2023' and FiscalQtr = 'Q0' and Metric = 'Volunteer Hours'
+
+
+--Updates for distribution
+
+Update
+	OPSP_Actual2
+set Value = (Select
+	Pounds
+	from
+	Pounds_Distributed_Qtr
+	Where FiscalYear = '2023' and FiscalQtr = 'Q2' and Metric ='Pounds Distributed in Network') 
+Where 
+	FiscalYear = '2023' and FiscalQtr = 'Q2' and Metric = 'Pounds Distributed in Network'
+
+Update
+	OPSP_Actual2
+set Value = (Select
+	Pounds
+	from
+	Pounds_Distributed_Qtr
+	Where FiscalYear = '2023' and FiscalQtr = 'Q1' and Metric ='Pounds Distributed in Network') 
+Where 
+	FiscalYear = '2023' and FiscalQtr = 'Q1' and Metric = 'Pounds Distributed in Network'
+
+Update
+	OPSP_Actual2
+set Value = (Select
+	Pounds
+	from
+	Pounds_Distributed_Qtr
+	Where FiscalYear = '2023' and FiscalQtr = 'Q3' and Metric ='Pounds Distributed in Network') 
+Where 
+	FiscalYear = '2023' and FiscalQtr = 'Q3' and Metric = 'Pounds Distributed in Network'
+
+Update
+	OPSP_Actual2
+set Value = (Select
+	Pounds
+	from
+	Pounds_Distributed_Qtr
+	Where FiscalYear = '2023' and FiscalQtr = 'Q4' and Metric ='Pounds Distributed in Network') 
+Where 
+	FiscalYear = '2023' and FiscalQtr = 'Q4' and Metric = 'Pounds Distributed in Network'
+
+Update
+	OPSP_Actual2
+set Value = (Select
+	pounds
+	from
+	Pounds_Distributed_Yearly
+	Where FiscalYear = '2023' and FiscalQtr = 'Q0' and Metric ='Pounds Distributed in Network') 
+Where 
+	FiscalYear = '2023' and FiscalQtr = 'Q0' and Metric = 'Pounds Distributed in Network'
+
+
+
+
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+--Creates the table for OPSP_Final
+
+--Drop Table
+--	OPSP_Final
+
+--Create Table
+--	OPSP_Final
+--	([FiscalYear] varchar (100),
+--	[FiscalQtr] varchar (100),
+--	SourceSort int,
+--	[Source] nvarchar (255),
+--	[Sort] int,
+--	[MetricSort] varchar (100),
+--	[Metric] nvarchar (255),
+--	[Goal] char (1000),
+--	[Actual] char (1000),
+--	[Format] nvarchar (50))
+
+
+Truncate Table
+	OPSP_Final
+Insert into	
+	OPSP_Final
+--Select
+--	FiscalYear,
+--	FiscalQtr,
+--	SourceSort,
+--	Source,
+--	Sort,
+--	MetricSort,
+--	Metric,
+--	convert(float, Goal) as Goal,
+--	convert(float, Actual) as Actual,
+--	Format
+--from
+--(
+
+Select
+	FiscalYear,
+	FiscalQtr,
+	SourceSort,
+	Source,
+	Sort,
+	MetricSort,
+	Metric,
+	Coalesce (GoalV, GoalT) as Goal,
+	Coalesce(Value, Text) as Actual,
+	Format
+From
+(Select
+	a.[FiscalYear],
+	a.FiscalQtr,
+	a.SourceSort,
+	a.[Source],
+	a.Sort,
+	a.MetricSort,
+	a.Metric,
+	Convert(char,(g.Value)) as 'GoalV',
+	Convert(char,(g.Text)) as 'GoalT',
+	Convert(char,(a.[Value])) as 'Value',
+	Convert(char,(a.[Text])) as 'Text',
+	a.Format
+From
+	OPSP_Actual2 a
+Left Join
+	OPSP_Goals g
+	on
+		g.FiscalYear =a. FiscalYear and
+		g.FiscalQtr = a.FiscalQtr and
+		g.Metric = a.Metric
+	) as test
+order by 
+	FiscalYear,FiscalQtr desc
+
+
+
+
+
