@@ -1,10 +1,12 @@
 --This file runs an update pulling in all manually inpout entries into a filtering table
---I kept all the code to create tables and drop tables from their creation as notes if something werre 
+--I kept all the code to create tables and creation as notes if something were to get dropped or as notees for future 
+--Analysts that take the position.
 
 --OPSP_Man_Filter
 
 
 ----You need to run this if you import the Goals for opsp
+--In this case this is
 
 --varchar is fiscal Qtr and Year
 
@@ -15,11 +17,7 @@
 --Where --used to do on specific rowss
 
 
-
----OPSP Actual Table construction here
---combine all tables here to populate OPSP
---Brings original data from staging table in and structures it for analysis
-
+--The staging table is from a dtsx package and is used to bring in the manually input data.
 
 
 --Create Table
@@ -36,8 +34,12 @@
 --	[Text] varchar (50),
 --	[ReportDate] date)
 
+--removes past entries in the table since there are not many records this is the fastest way.
+
 truncate table 
 	OPSP_Manual_Entries2
+
+--This will get all the data into a table to be filtered
 
 Insert into	
 	OPSP_Manual_Entries2
@@ -88,6 +90,8 @@ from OPSP_Manual_Entries_Stg s) as opsp
 --	[Metric] nvarchar (255),  
 --	[EndTime] datetime)
 
+--Takes only the most recent data for each data point
+
 Truncate Table
 	OPSP_Filter
 Insert into
@@ -118,6 +122,10 @@ group by Metric, FiscalQtr, FiscalYear
 --	[Value] numeric(20,2),
 --	[Text] varchar (50),
 --	[EndTime] datetime)
+
+
+-This gets the data that is the most recent and collects it in one table
+
 Truncate Table
 	OPSP_Filtered_Manual
 INsert into	
@@ -154,6 +162,8 @@ OPSP_Manual_Entries_Stg --table comes from a dtsx package
 ------------------------------------------------------------------------------------------------------------------------------------------
 
 --This pulls in information from the ERP system to fulfill specific metrics
+
+--This takes our volunteer hours and constructs it in the specific quarter and year
 
 truncate table
   Qtr_Volunteer_Hours
@@ -192,7 +202,8 @@ group by
 
 --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
---Fiscal Year Hours
+
+--Fiscal Year Hours for volunteers
 
 --Drop Table
 --	FiscalYear_Volunteer_Hours
@@ -236,6 +247,8 @@ group by
 
 ---------------------------------------------------------------------------------------------------------------------------
 --Set up Pounds Distributed for OPSP
+
+__This gets pounds that have been distributed and seperates it by quarter
 
 --Quarterly Pounds Distributed
 
@@ -292,8 +305,7 @@ group by y.FiscalYear
 
 --FIscal Year Table
 
---Drop Table
---	Pounds_Distributed_Yearly
+--This gets the pounds distributed for fiscal years
 
 --Create Table
 --	Pounds_Distributed_Yearly
@@ -412,6 +424,8 @@ set Value = (Select
 Where 
 	FiscalYear = '2023' and FiscalQtr = 'Q3' and Metric = 'Volunteer Hours'
 
+
+--Updates volunteer hours for the the final
 Update
 	OPSP_Actual2
 set Value = (Select
@@ -433,7 +447,7 @@ Where
 	FiscalYear = '2023' and FiscalQtr = 'Q0' and Metric = 'Volunteer Hours'
 
 
---Updates for distribution
+--Updates for distribution to the final table
 
 Update
 	OPSP_Actual2
@@ -509,6 +523,7 @@ Where
 --	[Actual] char (1000),
 --	[Format] nvarchar (50))
 
+--This is where the data now all comes together to make the final table that includes the goals for OPSP
 
 Truncate Table
 	OPSP_Final
@@ -566,6 +581,6 @@ order by
 	FiscalYear,FiscalQtr desc
 
 
-
+--After this the data is taken in through a connection with Power BI to make the data visualization that is used by the organization.
 
 
